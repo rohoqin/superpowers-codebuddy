@@ -1,0 +1,24 @@
+{
+  "repo": "https://github.com/obra/superpowers.git",
+  "ref": "v7.0.1",
+  "commit": "2ce8aa1",
+  "release_date": "2026-10-21",
+  "skills": [
+    "brainstorming",
+    "diagnosing-superpowers",
+    "dispatching-parallel-agents",
+    "executing-plans",
+    "finishing-a-development-branch",
+    "receiving-code-review",
+    "requesting-code-review",
+    "subagent-driven-development",
+    "systematic-debugging",
+    "test-driven-development",
+    "using-git-worktrees",
+    "using-superpowers",
+    "verification-before-completion",
+    "writing-plans",
+    "writing-skills"
+  ],
+  "adaptation": 1
+}

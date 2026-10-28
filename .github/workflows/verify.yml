@@ -1,0 +1,41 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 拉取锁定的上游版本
+        run: |
+          REF=$(python3 -c "import json;print(json.load(open('adapt/upstream.json'))['ref'])")
+          echo "upstream ref = $REF"
+          git clone --depth 1 --branch "$REF" https://github.com/obra/superpowers.git .cache/upstream
+
+      - name: 生成物必须与生成器一致（禁止手改产物）
+        run: |
+          python3 adapt/generate.py --upstream .cache/upstream
+          if ! git diff --exit-code -- skills/; then
+            echo "::error::skills/ 与生成器输出不一致。请运行 python3 adapt/generate.py 后提交，不要手改产物。"
+            exit 1
+          fi
+
+      - name: 回归测试
+        run: python3 adapt/verify.py
+
+      - name: 打包产物必须与版本一致
+        run: |
+          python3 adapt/package.py
+          python3 adapt/package.py --check

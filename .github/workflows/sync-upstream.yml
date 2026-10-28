@@ -1,0 +1,91 @@
+name: sync-upstream
+
+# 每周探测上游新 tag；有新版就重新生成、更新 pin、开 PR。
+# 需要 secret SYNC_TOKEN（fine-grained PAT，含 contents + pull-requests 写权限）：
+# GitHub 默认的 GITHUB_TOKEN 建的 PR 不会触发 verify.yml，等于没有 CI 保护。
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 找出上游最新 tag 并与 pin 比较
+        id: cmp
+        run: |
+          PINNED=$(python3 -c "import json;print(json.load(open('adapt/upstream.json'))['ref'])")
+          LATEST=$(git ls-remote --tags --refs https://github.com/obra/superpowers.git 'v*' \
+                   | awk -F/ '{print $NF}' | sort -V | tail -1)
+          echo "pinned=$PINNED latest=$LATEST"
+          echo "pinned=$PINNED" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$PINNED" = "$LATEST" ]; then
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 有新版本则重新生成
+        if: steps.cmp.outputs.needs_sync == 'true'
+        run: |
+          LATEST="${{ steps.cmp.outputs.latest }}"
+          git clone --depth 1 --branch "$LATEST" https://github.com/obra/superpowers.git .cache/upstream
+          python3 adapt/generate.py --ref "$LATEST" --upstream .cache/upstream || {
+            echo "::error::上游结构发生变化（可能增删技能），需要人工确认 adapt/upstream.json"
+            exit 1
+          }
+          python3 - "$LATEST" <<'PY'
+          import json, pathlib, subprocess, sys
+          ref = sys.argv[1]
+          p = pathlib.Path('adapt/upstream.json')
+          d = json.loads(p.read_text(encoding='utf-8'))
+          d['ref'] = ref
+          d['commit'] = subprocess.run(['git', '-C', '.cache/upstream', 'rev-parse', '--short', 'HEAD'],
+                                       capture_output=True, text=True).stdout.strip()
+          d['release_date'] = subprocess.run(['git', '-C', '.cache/upstream', 'log', '-1', '--format=%ad', '--date=short'],
+                                             capture_output=True, text=True).stdout.strip()
+          d['skills'] = sorted(x.name[len('superpowers-'):] for x in pathlib.Path('skills').glob('superpowers-*'))
+          d['adaptation'] = d.get('adaptation', 1) + 1
+          p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('updated pin ->', d['ref'], d['commit'], 'adaptation', d['adaptation'])
+          PY
+          python3 adapt/package.py
+          python3 adapt/verify.py
+
+      - name: 开 PR
+        if: steps.cmp.outputs.needs_sync == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST="${{ steps.cmp.outputs.latest }}"
+          BR="chore/upstream-${LATEST}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add -A
+          git commit -m "chore: 同步上游 ${LATEST}"
+          git push -u origin "$BR"
+          cat > /tmp/pr-body.md <<EOF
+          由 sync-upstream workflow 自动生成，对应上游 ${LATEST}。
+
+          请重点看三处：
+
+          - \`adapt/upstream.json\` 的 ref / commit / skills 是否合理
+          - \`skills/\` 的 diff 是否只是上游正常改动
+          - \`adapt/verify.py\` 是否全绿
+          EOF
+          gh pr create --base main --head "$BR" \
+            --title "chore: 同步上游 ${LATEST}" \
+            --body-file /tmp/pr-body.md

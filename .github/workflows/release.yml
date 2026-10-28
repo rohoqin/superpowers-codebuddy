@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 校验生成物未被手改
+        run: |
+          REF=$(python3 -c "import json;print(json.load(open('adapt/upstream.json'))['ref'])")
+          git clone --depth 1 --branch "$REF" https://github.com/obra/superpowers.git .cache/upstream
+          python3 adapt/generate.py --upstream .cache/upstream
+          git diff --exit-code -- skills/
+
+      - name: 回归测试
+        run: python3 adapt/verify.py
+
+      - name: 打包
+        id: pack
+        run: |
+          python3 adapt/package.py
+          VER=$(python3 -c "import json;d=json.load(open('adapt/upstream.json'));print(d['ref'].lstrip('v')+'-cb.'+str(d['adaptation']))")
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          ls -lh dist/
+
+      - name: 写发布说明
+        run: |
+          REF=$(python3 -c "import json;print(json.load(open('adapt/upstream.json'))['ref'])")
+          cat > /tmp/notes.md <<EOF
+          对应上游 ${REF}。
+
+          zip 内含 15 个技能、`.codebuddy-skill/marketplace.json` 与 README，供 SkillHub 提交与手动安装。
+
+          手动安装：下载解压后把 \`skills/superpowers-*\` 复制到 \`~/.codebuddy/skills/\`，
+          或直接用仓库里的 \`install.sh\`。
+          EOF
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.zip \
+            --title "superpowers-codebuddy ${{ steps.pack.outputs.ver }}" \
+            --notes-file /tmp/notes.md

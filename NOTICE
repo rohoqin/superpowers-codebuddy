@@ -1,0 +1,34 @@
+superpowers-codebuddy
+=====================
+
+本项目包含从 obra/superpowers 派生的技能内容。
+
+Upstream
+--------
+Name    : superpowers
+Author  : Jesse Vincent and contributors at Prime Radiant
+Source  : https://github.com/obra/superpowers
+Version : v7.0.1 (commit 2ce8aa1, 2026-10-21)
+License : MIT
+Copyright: Copyright (c) Jesse Vincent
+
+Upstream 的完整许可文本见 https://github.com/obra/superpowers/blob/main/LICENSE
+
+Modifications
+-------------
+`skills/` 下的内容由 `adapt/generate.py` 从上游生成，改动仅限：
+
+1. 目录名与 SKILL.md 的 frontmatter `name` 增加 `superpowers-` 前缀
+2. `superpowers:<skill>` 引用改写为 `superpowers-<skill>`
+3. 跨技能相对路径 `../<skill>/` 改写为 `../superpowers-<skill>/`
+4. 新增 `references/codebuddy-tools.md`，并在 `using-superpowers` 的平台适配表中登记 CodeBuddy
+5. `writing-skills` 中的技能存放路径补充 CodeBuddy 目录
+6. `brainstorming` 中 CodeBuddy 不支持的后台执行方式改为 `nohup ... &`
+
+除此之外未修改上游技能的方法论内容、措辞与结构。
+
+本项目的适配层（`adapt/`、`install.sh`、`hooks/`、文档）由 Roho Qin 编写，同样以 MIT 授权。
+
+License
+-------
+MIT License, 见 LICENSE 文件。

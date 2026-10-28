@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Superpowers SessionStart hook for CodeBuddy.
+# 把 using-superpowers 技能全文注入会话上下文，使技能在第一条消息前就被激活。
+# 约定（见 CodeBuddy genie 扩展 SessionHookManager）：
+#   stdin  : hook 事件 JSON
+#   stdout : {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
+# 失败必须放行：任何异常都以 exit 0 + 空输出结束，绝不阻塞会话。
+
+set -uo pipefail
+
+SKILL_DIR="${SUPERPOWERS_SKILL_DIR:-$HOME/.codebuddy/skills/superpowers-using-superpowers}"
+skill_md="$SKILL_DIR/SKILL.md"
+
+# 技能未安装（或用户主动禁用）时静默退出
+[ -r "$skill_md" ] || exit 0
+
+# 消费 stdin，避免上游写入 EPIPE
+[ -t 0 ] || cat >/dev/null 2>&1 || true
+
+content="$(<"$skill_md")"
+[ -n "$content" ] || exit 0
+
+# 只取正文，去掉 frontmatter（系统提示里已有 description）
+body="${content#*$'\n---'}"
+body="${body#*$'\n---'}"
+[ -n "$body" ] || body="$content"
+
+context="<EXTREMELY_IMPORTANT>
+You have superpowers.
+
+以下是你的 'superpowers-using-superpowers' 技能全文 —— 技能系统的入口。其余技能用 CodeBuddy 的 use_skill 工具加载，技能名为 superpowers-<name>（例如 superpowers-brainstorming、superpowers-writing-plans），没有冒号命名空间。
+
+CodeBuddy 工具词汇：Skill=use_skill，TodoWrite=todo_write，Bash=execute_command，Read=read_file，Write=write_to_file，Edit=replace_in_file，Grep=search_content，Glob=list_dir/search_file，Task=task。子 Agent 只有只读的 code-explorer，需要写代码时改用 superpowers-executing-plans 内联执行。
+
+${body}
+</EXTREMELY_IMPORTANT>"
+
+escape_for_json() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+escaped="$(escape_for_json "$context")"
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}' "$escaped"
+exit 0
