@@ -112,8 +112,15 @@ def run_hook(env=None, stdin=b'{"hook_event_name":"SessionStart","source":"start
 
 
 def t_hook_contract():
-    p, _ = run_hook()
+    # 故意把 HOME 指到空目录：证明 hook 能从仓库内相对定位找到技能，
+    # 而不是只在"本机恰好装过"时才工作（CI 上就是这么抓到的）。
+    empty = tempfile.TemporaryDirectory(prefix="spcb-home-")
+    try:
+        p, _ = run_hook(env={"HOME": empty.name, "SUPERPOWERS_SKILL_DIR": ""})
+    finally:
+        empty.cleanup()
     assert p.returncode == 0, f"hook 退出码 {p.returncode}: {p.stderr[:200]!r}"
+    assert p.stdout.strip(), "hook 没输出：技能路径解析失败（安装目录与仓库布局都没命中）"
     payload = json.loads(p.stdout.decode())
     hso = payload["hookSpecificOutput"]
     assert hso["hookEventName"] == "SessionStart", "hookEventName 不对"
@@ -126,11 +133,24 @@ def t_hook_contract():
 
 
 def t_hook_failopen():
-    p, _ = run_hook(env={"SUPERPOWERS_SKILL_DIR": "/nonexistent"})
-    assert p.returncode == 0 and p.stdout.strip() == b"", "技能缺失时应静默放行"
-    p2, _ = run_hook(stdin=b"")
-    assert p2.returncode == 0, "空 stdin 时不应报错"
-    return "缺技能/空输入均静默放行"
+    # 把 hook 单独拷到一个没有 skills/ 的目录，模拟"装了 hook 但技能没装"
+    tmp = tempfile.TemporaryDirectory(prefix="spcb-lone-")
+    try:
+        lone = Path(tmp.name) / "hooks"
+        lone.mkdir()
+        script = lone / "session-start"
+        shutil.copy2(HOOK, script)
+        os.chmod(script, 0o755)
+        env = {**os.environ, "HOME": str(Path(tmp.name) / "home"), "SUPERPOWERS_SKILL_DIR": "/nonexistent"}
+        p = subprocess.run([str(script)], input=b'{"hook_event_name":"SessionStart"}',
+                           capture_output=True, env=env, timeout=30)
+        assert p.returncode == 0, f"技能缺失时不该报错（退出码 {p.returncode}）"
+        assert p.stdout.strip() == b"", "技能缺失时不该注入内容"
+        p2 = subprocess.run([str(script)], input=b"", capture_output=True, env=env, timeout=30)
+        assert p2.returncode == 0, "空 stdin 时不该报错"
+        return "缺技能/空输入均静默放行"
+    finally:
+        tmp.cleanup()
 
 
 def t_hook_speed():

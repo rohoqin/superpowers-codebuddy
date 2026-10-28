@@ -1,18 +1,37 @@
 #!/usr/bin/env bash
 # Superpowers SessionStart hook for CodeBuddy.
 # 把 using-superpowers 技能全文注入会话上下文，使技能在第一条消息前就被激活。
-# 约定（见 CodeBuddy genie 扩展 SessionHookManager）：
+# 约定（CodeBuddy genie 扩展 SessionHookManager）：
 #   stdin  : hook 事件 JSON
 #   stdout : {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
 # 失败必须放行：任何异常都以 exit 0 + 空输出结束，绝不阻塞会话。
 
 set -uo pipefail
 
-SKILL_DIR="${SUPERPOWERS_SKILL_DIR:-$HOME/.codebuddy/skills/superpowers-using-superpowers}"
-skill_md="$SKILL_DIR/SKILL.md"
+# 技能目录解析顺序（任命中即用）：
+#   1. SUPERPOWERS_SKILL_DIR 显式指定
+#   2. 标准安装位置 ~/.codebuddy/skills/
+#   3. 仓库内布局 <repo>/hooks/ + <repo>/skills/
+#   4. 安装包布局 <cb>/superpowers/hooks/ + <cb>/skills/
+SKILL_NAME="superpowers-using-superpowers"
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 
-# 技能未安装（或用户主动禁用）时静默退出
-[ -r "$skill_md" ] || exit 0
+skill_md=""
+for candidate in \
+  "${SUPERPOWERS_SKILL_DIR:-}" \
+  "$HOME/.codebuddy/skills/$SKILL_NAME" \
+  "$self_dir/../skills/$SKILL_NAME" \
+  "$self_dir/../../skills/$SKILL_NAME"
+do
+  [ -n "$candidate" ] || continue
+  if [ -r "$candidate/SKILL.md" ]; then
+    skill_md="$candidate/SKILL.md"
+    break
+  fi
+done
+
+# 找不到技能（未安装/被禁用）时静默退出
+[ -n "$skill_md" ] || exit 0
 
 # 消费 stdin，避免上游写入 EPIPE
 [ -t 0 ] || cat >/dev/null 2>&1 || true
